@@ -6,15 +6,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import yt_dlp
+import imageio_ffmpeg
 
 app = FastAPI()
 
+# Ambil path FFmpeg otomatis dari imageio-ffmpeg
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+
 class DownloadRequest(BaseModel):
     urls: List[str]
-    format: str = "mp3"       # Pilihan format: mp3, wav, m4a
-    quality: str = "medium"   # Pilihan kualitas: low, medium, high
+    format: str = "mp3"
+    quality: str = "medium"
 
-# Mengubah pilihan kualitas menjadi angka bitrate
 QUALITY_MAP = {
     'low': '64',
     'medium': '128',
@@ -31,6 +34,7 @@ async def download_batch(data: DownloadRequest):
     
     ydl_opts = {
         'format': 'bestaudio/best',
+        'ffmpeg_location': FFMPEG_PATH, # Jalur FFmpeg otomatis
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': data.format,
@@ -43,7 +47,6 @@ async def download_batch(data: DownloadRequest):
     downloaded_files = []
     
     try:
-        # Proses download setiap link yang dikirim user
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             for url in data.urls:
                 try:
@@ -51,7 +54,6 @@ async def download_batch(data: DownloadRequest):
                 except Exception as e:
                     print(f"Gagal download {url}: {e}")
         
-        # Kumpulkan file yang sudah jadi
         for file in os.listdir(output_dir):
             downloaded_files.append(os.path.join(output_dir, file))
             
@@ -59,16 +61,12 @@ async def download_batch(data: DownloadRequest):
             shutil.rmtree(output_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail="Tidak ada audio yang berhasil di-download.")
 
-        # Gabungkan semua file audio menjadi satu file ZIP
         zip_path = f"output_{batch_id}.zip"
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for file in downloaded_files:
                 zipf.write(file, os.path.basename(file))
                 
-        # Bersihkan folder mentah
         shutil.rmtree(output_dir, ignore_errors=True)
-        
-        # Kirim file ZIP ke user
         return FileResponse(zip_path, media_type='application/zip', filename="youtube_audio_batch.zip")
 
     except Exception as e:
